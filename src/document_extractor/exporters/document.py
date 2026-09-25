@@ -2,6 +2,7 @@ from pathlib import Path
 
 from document_extractor.config import MARKDOWN_IGNORE_LABELS
 from document_extractor.exporters.bundle import OutputBundle
+from document_extractor.html_images import rewrite_image_sources
 from document_extractor.models import FormulaPlacement, NormalizedDocument, TableContent
 
 
@@ -39,6 +40,19 @@ class DocumentExporter:
         bundle.create()
         sections = []
         table_count = image_count = 0
+        exported_assets: dict[str, str] = {}
+
+        def resolve_image(source: str, prefix: str) -> str:
+            nonlocal image_count
+            if source not in document.image_assets:
+                raise ValueError(f"Embedded image has no pixels: {source}")
+            if source not in exported_assets:
+                name = f"img-{image_count}.png"
+                (bundle.images_dir / name).write_bytes(document.image_assets[source])
+                exported_assets[source] = name
+                image_count += 1
+            return prefix + exported_assets[source]
+
         for page in document.pages:
             previous_inline = False
             previous_text = False
@@ -47,13 +61,26 @@ class DocumentExporter:
                     previous_inline = previous_text = False
                     continue
                 content = element.content.strip()
+                if element.kind != "table" and "<img" in content.lower():
+                    content = rewrite_image_sources(
+                        content, lambda src: resolve_image(src, "images/")
+                    )
                 if element.kind == "table":
                     name = f"tbl-{table_count}.html"
                     html = element.table.html if element.table else element.content
-                    (bundle.tables_dir / name).write_text(html, encoding="utf-8")
-                    sections.append(
-                        render_table(element.table) if element.table else html
+                    artifact_html = rewrite_image_sources(
+                        html, lambda src: resolve_image(src, "../images/")
                     )
+                    (bundle.tables_dir / name).write_text(
+                        artifact_html, encoding="utf-8"
+                    )
+                    sections.append(
+                        rewrite_image_sources(
+                            render_table(element.table) if element.table else html,
+                            lambda src: resolve_image(src, "images/"),
+                        )
+                    )
+                    sections.append(f"[Table {table_count + 1}](tables/{name})")
                     table_count += 1
                 elif element.image_png is not None:
                     name = f"img-{image_count}.png"

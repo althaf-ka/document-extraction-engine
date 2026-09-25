@@ -21,7 +21,10 @@ def export(tmp_path, blocks):
 def test_rectangular_table_and_exact_artifact(tmp_path):
     html = " <table><tr><th>Name</th><th>Score</th></tr><tr><td>Alice</td><td>92</td></tr><tr><td>Bob</td><td>87</td></tr></table>\n"
     document, bundle, markdown = export(tmp_path, [block("table", html)])
-    assert markdown == "| Name | Score |\n| --- | --- |\n| Alice | 92 |\n| Bob | 87 |\n"
+    assert (
+        markdown
+        == "| Name | Score |\n| --- | --- |\n| Alice | 92 |\n| Bob | 87 |\n\n[Table 1](tables/tbl-0.html)\n"
+    )
     assert (bundle.tables_dir / "tbl-0.html").read_text() == html
     table = document.pages[0].elements[0].table
     assert table is not None
@@ -35,7 +38,7 @@ def test_spanning_table_embedded_with_artifact(tmp_path, span):
         tmp_path,
         [block("text", "Before"), block("table", html), block("text", "After")],
     )
-    assert markdown == f"Before\n\n{html}\n\nAfter\n"
+    assert markdown == f"Before\n\n{html}\n\n[Table 1](tables/tbl-0.html)\n\nAfter\n"
     assert (bundle.tables_dir / "tbl-0.html").read_text() == html
     table = document.pages[0].elements[1].table
     assert table is not None
@@ -47,7 +50,7 @@ def test_headerless_table_keeps_all_data_and_escapes_cells(tmp_path):
     _, _, markdown = export(tmp_path, [block("table", html)])
     assert (
         markdown
-        == "|  |  |\n| --- | --- |\n| A\\|B | &lt;x&gt; &amp; \\_y\\_ |\n| C | 2 |\n"
+        == "|  |  |\n| --- | --- |\n| A\\|B | &lt;x&gt; &amp; \\_y\\_ |\n| C | 2 |\n\n[Table 1](tables/tbl-0.html)\n"
     )
 
 
@@ -61,7 +64,21 @@ def test_headerless_table_keeps_all_data_and_escapes_cells(tmp_path):
 )
 def test_complex_content_preserved(tmp_path, html):
     _, _, markdown = export(tmp_path, [block("table", html)])
-    assert markdown == html + "\n"
+    assert markdown == html + "\n\n[Table 1](tables/tbl-0.html)\n"
+
+
+def test_consecutive_tables_get_ordered_links(tmp_path):
+    first = '<table><tr><td rowspan="2">A</td></tr><tr><td>A2</td></tr></table>'
+    second = '<table><tr><td rowspan="2">B</td></tr><tr><td>B2</td></tr></table>'
+    _, bundle, markdown = export(
+        tmp_path, [block("table", first), block("table", second)]
+    )
+    assert markdown == (
+        f"{first}\n\n[Table 1](tables/tbl-0.html)\n\n"
+        f"{second}\n\n[Table 2](tables/tbl-1.html)\n"
+    )
+    assert (bundle.tables_dir / "tbl-0.html").read_text() == first
+    assert (bundle.tables_dir / "tbl-1.html").read_text() == second
 
 
 @pytest.mark.parametrize("latex", [r"\frac{x}{2}", r"\frac{\pi}{2}"])

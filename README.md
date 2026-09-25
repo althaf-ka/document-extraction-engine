@@ -126,6 +126,8 @@ any row and column spans.
 
 Figures use relative references such as `![Image 1](images/img-0.png)` in the
 extracted sequence. Available recognized content follows the image.
+Images inside tables are also saved in `images/`. Their HTML references use
+`images/` in Markdown and `../images/` in the separate table files.
 Formula rendering requires a Markdown viewer with LaTeX support.
 
 `--debug` adds `debug/elements.json` with normalized elements and

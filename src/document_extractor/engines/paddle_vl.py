@@ -15,6 +15,7 @@ from document_extractor.engines.normalization import (
     normalize_table,
 )
 from document_extractor.events import ProgressCallback, ProgressEvent, ignore_progress
+from document_extractor.html_images import rewrite_image_sources
 from document_extractor.models import DocumentElement, NormalizedDocument, Page
 from document_extractor.processing.mcq import retry_missing_options
 from document_extractor.processing.tables import retry_incomplete_tables
@@ -136,6 +137,9 @@ class PaddleVLEngine:
                 ProgressEvent("recovery", "Question checks complete", completed=True)
             )
         if path.suffix.lower() == ".pdf":
+            # Table reconstruction can move HTML to another page. Qualify crop
+            # paths first so equal coordinates on different pages stay distinct.
+            qualify_image_paths(results)
             self.on_progress(ProgressEvent("reconstruction", "Reconstructing document"))
             logger.info("Reconstructing PDF headings and cross-page tables")
             results = self._pipeline.restructure_pages(
@@ -157,9 +161,37 @@ class PaddleVLEngine:
         return document
 
 
-def adapt_results(results: Any, path: Path) -> NormalizedDocument:
-    pages = []
+def qualify_image_paths(results: Any) -> None:
     for index, result in enumerate(results):
+        mapping = {}
+        for asset in result.get("imgs_in_doc", []):
+            original = asset["path"]
+            qualified = (
+                original
+                if original.startswith("paddle-page-")
+                else f"paddle-page-{index}/{original}"
+            )
+            mapping[original] = qualified
+            asset["path"] = qualified
+        for block in result["parsing_res_list"]:
+            if "<img" in block.content.lower():
+                block.content = rewrite_image_sources(
+                    block.content,
+                    lambda source, mapping=mapping: mapping.get(source, source),
+                )
+
+
+def adapt_results(results: Any, path: Path) -> NormalizedDocument:
+    results = list(results)
+    qualify_image_paths(results)
+    pages = []
+    image_assets = {}
+    for index, result in enumerate(results):
+        for asset in result.get("imgs_in_doc", []):
+            if asset.get("img") is not None:
+                buffer = BytesIO()
+                asset["img"].save(buffer, format="PNG")
+                image_assets[asset["path"]] = buffer.getvalue()
         page_index = result.get("page_index")
         page = Page(number=(page_index if page_index is not None else index) + 1)
         # Paddle's list already follows reading order, including unnumbered blocks.
@@ -207,4 +239,6 @@ def adapt_results(results: Any, path: Path) -> NormalizedDocument:
                 )
             )
         pages.append(page)
-    return NormalizedDocument(pages=pages, source=str(path), engine="paddle-vl")
+    return NormalizedDocument(
+        pages=pages, source=str(path), engine="paddle-vl", image_assets=image_assets
+    )
