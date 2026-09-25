@@ -1,0 +1,38 @@
+services:
+  app:
+    build: .
+    environment:
+      DOCUMENT_ENGINE: paddle-vl
+      VLM_BACKEND: llama-cpp
+      VLM_SERVER_URL: http://vlm:8080/v1
+      VLM_MAX_CONCURRENCY: ${VLM_MAX_CONCURRENCY:-2}
+    volumes:
+      - ./input:/app/input:ro
+      - ./output:/app/output
+      - paddle-cache:/root/.paddlex
+      - hf-cache:/root/.cache/huggingface
+    depends_on:
+      vlm:
+        condition: service_healthy
+    command: ["input/document.pdf"]
+
+  vlm:
+    image: ghcr.io/ggml-org/llama.cpp:server
+    ports:
+      - "127.0.0.1:${VLM_PORT:-8111}:8080"
+    environment:
+      LLAMA_CACHE: /root/.cache/llama.cpp
+    volumes:
+      - llama-cache:/root/.cache/llama.cpp
+    command: ["-hf", "PaddlePaddle/PaddleOCR-VL-1.6-GGUF", "--host", "0.0.0.0", "--port", "8080", "--temp", "0", "--ctx-size", "${VLM_CONTEXT_SIZE:-4096}", "--parallel", "${VLM_MAX_CONCURRENCY:-2}"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 120
+      start_period: 30s
+
+volumes:
+  paddle-cache:
+  hf-cache:
+  llama-cache:

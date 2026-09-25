@@ -8,3 +8,12 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Raw Paddle spike results
+benchmarks/output/
+
+# Local extraction artifacts
+output/
+input/
+models/
+.env
