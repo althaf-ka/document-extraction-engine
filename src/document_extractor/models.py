@@ -56,3 +56,4 @@ class NormalizedDocument:
     engine: str | None = None
     debug_results: list[dict] | None = None
     image_assets: dict[str, bytes] = field(default_factory=dict)
+    watermark_report: list[dict] = field(default_factory=list)

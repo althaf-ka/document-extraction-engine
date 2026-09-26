@@ -6,6 +6,7 @@ services:
       VLM_BACKEND: llama-cpp
       VLM_SERVER_URL: http://vlm:8080/v1
       VLM_MAX_CONCURRENCY: ${VLM_MAX_CONCURRENCY:-2}
+      WATERMARK_MODE: ${WATERMARK_MODE:-off}
     volumes:
       - ./input:/app/input:ro
       - ./output:/app/output

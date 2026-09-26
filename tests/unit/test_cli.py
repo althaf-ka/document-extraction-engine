@@ -5,7 +5,7 @@ import typer
 from typer.testing import CliRunner
 
 from document_extractor.cli import extract
-from document_extractor.config import InferenceBackend
+from document_extractor.config import InferenceBackend, WatermarkMode
 from document_extractor.exporters.bundle import OutputBundle
 
 app = typer.Typer()
@@ -50,6 +50,36 @@ def test_extract_uses_default_vlm_tuning(tmp_path: Path) -> None:
     config = pipeline.call_args.kwargs["config"]
     assert config.max_concurrency == 1
     assert config.layout_threshold == 0.5
+    assert config.watermark_mode == WatermarkMode.OFF
+    assert config.question_layout is True
+
+
+def test_question_layout_reaches_configuration(tmp_path: Path) -> None:
+    bundle = OutputBundle.for_input(Path("paper.pdf"), tmp_path)
+    with patch("document_extractor.cli.ExtractionPipeline") as pipeline:
+        pipeline.return_value.run.return_value = bundle
+        result = runner.invoke(app, ["paper.pdf", "--question-layout"])
+    assert result.exit_code == 0, result.output
+    assert pipeline.call_args.kwargs["config"].question_layout is True
+
+
+def test_question_layout_can_be_disabled(tmp_path: Path) -> None:
+    bundle = OutputBundle.for_input(Path("paper.pdf"), tmp_path)
+    with patch("document_extractor.cli.ExtractionPipeline") as pipeline:
+        pipeline.return_value.run.return_value = bundle
+        result = runner.invoke(app, ["paper.pdf", "--no-question-layout"])
+    assert result.exit_code == 0, result.output
+    assert pipeline.call_args.kwargs["config"].question_layout is False
+
+
+def test_watermark_mode_reaches_configuration(tmp_path: Path) -> None:
+    bundle = OutputBundle.for_input(Path("paper.pdf"), tmp_path)
+    with patch("document_extractor.cli.ExtractionPipeline") as pipeline:
+        pipeline.return_value.run.return_value = bundle
+        result = runner.invoke(app, ["paper.pdf", "--watermark-mode", "report"])
+    assert result.exit_code == 0, result.output
+    assert pipeline.call_args.kwargs["config"].watermark_mode == WatermarkMode.REPORT
+    assert "no content was removed" in result.output
 
 
 def test_extract_rejects_missing_server() -> None:
@@ -91,10 +121,11 @@ def test_main_loads_dotenv_with_environment_and_flag_precedence(tmp_path, monkey
     from document_extractor.cli import main
 
     monkeypatch.chdir(tmp_path)
-    for key in ("DOCUMENT_ENGINE", "VLM_BACKEND", "VLM_SERVER_URL"):
+    for key in ("DOCUMENT_ENGINE", "VLM_BACKEND", "VLM_SERVER_URL", "WATERMARK_MODE"):
         monkeypatch.delenv(key, raising=False)
     (tmp_path / ".env").write_text(
         "DOCUMENT_ENGINE=paddle-vl\nVLM_BACKEND=llama-cpp\nVLM_SERVER_URL=http://localhost:8111/v1\n"
+        "WATERMARK_MODE=filter\n"
     )
     monkeypatch.setenv("VLM_BACKEND", "mlx")
     bundle = OutputBundle.for_input(Path("paper.pdf"), tmp_path)
@@ -110,6 +141,17 @@ def test_main_loads_dotenv_with_environment_and_flag_precedence(tmp_path, monkey
         config = pipeline.call_args.kwargs["config"]
         assert config.backend == InferenceBackend.MLX
         assert config.server_url == "http://localhost:8111/v1"
+        assert config.watermark_mode == WatermarkMode.FILTER
+        monkeypatch.setenv("WATERMARK_MODE", "report")
+        main()
+        result = runner.invoke(app, ["paper.pdf"])
+        assert result.exit_code == 0, result.output
+        assert (
+            pipeline.call_args.kwargs["config"].watermark_mode == WatermarkMode.REPORT
+        )
+        result = runner.invoke(app, ["paper.pdf", "--watermark-mode", "off"])
+        assert result.exit_code == 0, result.output
+        assert pipeline.call_args.kwargs["config"].watermark_mode == WatermarkMode.OFF
         result = runner.invoke(app, ["paper.pdf", "--backend", "llama-cpp"])
         assert result.exit_code == 0, result.output
         assert pipeline.call_args.kwargs["config"].backend == InferenceBackend.LLAMA_CPP

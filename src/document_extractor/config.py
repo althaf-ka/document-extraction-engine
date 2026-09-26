@@ -29,6 +29,12 @@ class Profile(StrEnum):
     ROBUST = "robust"
 
 
+class WatermarkMode(StrEnum):
+    OFF = "off"
+    REPORT = "report"
+    FILTER = "filter"
+
+
 @dataclass(frozen=True, slots=True)
 class VLMConfig:
     backend: InferenceBackend = InferenceBackend.LOCAL
@@ -67,6 +73,7 @@ class PaddleVLConfig:
     mcq_crop_margin: int = 8
     table_retry: bool = True
     table_crop_margin: int = 8
+    watermark_mode: WatermarkMode = WatermarkMode.OFF
     vlm: VLMConfig = VLMConfig()
 
     def __post_init__(self) -> None:
@@ -98,7 +105,9 @@ class ExtractionConfig:
     max_concurrency: int = DEFAULT_PADDLE_CONFIG.vlm.max_concurrency
     layout_threshold: float = DEFAULT_PADDLE_CONFIG.layout_threshold
     debug: bool = False
+    question_layout: bool = True
     layout_unclip_ratio: float = DEFAULT_PADDLE_CONFIG.layout_unclip_ratio[0]
+    watermark_mode: WatermarkMode = WatermarkMode.OFF
 
     def to_paddle_config(self) -> PaddleVLConfig:
         robust = self.profile == Profile.ROBUST
@@ -108,6 +117,7 @@ class ExtractionConfig:
             layout_unclip_ratio=(self.layout_unclip_ratio, self.layout_unclip_ratio),
             use_doc_orientation_classify=robust,
             use_doc_unwarping=robust,
+            watermark_mode=self.watermark_mode,
             vlm=VLMConfig(
                 backend=self.backend,
                 server_url=self.server_url,
@@ -122,3 +132,5 @@ class ExtractionConfig:
                 raise ValueError("--backend and --server-url apply only to paddle-vl")
             if self.profile != Profile.BALANCED:
                 raise ValueError("--profile robust applies only to paddle-vl")
+            if self.watermark_mode != WatermarkMode.OFF:
+                raise ValueError("--watermark-mode applies only to paddle-vl")

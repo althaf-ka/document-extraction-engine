@@ -10,6 +10,7 @@ from document_extractor.config import (
     ExtractionConfig,
     InferenceBackend,
     Profile,
+    WatermarkMode,
 )
 from document_extractor.exceptions import DocumentExtractorError
 from document_extractor.pipeline import ExtractionPipeline
@@ -41,6 +42,19 @@ def extract(
     debug: Annotated[
         bool, typer.Option(help="Save extraction diagnostics in debug/.")
     ] = _DEFAULTS.debug,
+    question_layout: Annotated[
+        bool,
+        typer.Option(
+            help="Automatically format clearly identified exam tables as questions. Disable with --no-question-layout."
+        ),
+    ] = _DEFAULTS.question_layout,
+    watermark_mode: Annotated[
+        WatermarkMode,
+        typer.Option(
+            envvar="WATERMARK_MODE",
+            help="Repeated background text: off, report only, or conservative filter.",
+        ),
+    ] = _DEFAULTS.watermark_mode,
     verbose: Annotated[
         bool,
         typer.Option(
@@ -61,6 +75,8 @@ def extract(
             layout_threshold=layout_threshold,
             layout_unclip_ratio=unclip_ratio,
             debug=debug,
+            question_layout=question_layout,
+            watermark_mode=watermark_mode,
         )
     except ValueError as error:
         raise typer.BadParameter(str(error)) from error
@@ -80,6 +96,11 @@ def extract(
         typer.echo(str(error), err=True)
         raise typer.Exit(1) from error
     typer.echo(f"Output: {bundle.root_dir}")
+    if config.watermark_mode == WatermarkMode.REPORT:
+        typer.echo(
+            "Watermark report only: no content was removed. Review watermarks.json; "
+            "set WATERMARK_MODE=filter in .env to apply verified exclusions."
+        )
     progress.print_total()
 
 

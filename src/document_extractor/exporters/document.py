@@ -2,6 +2,9 @@ from pathlib import Path
 
 from document_extractor.config import MARKDOWN_IGNORE_LABELS
 from document_extractor.exporters.bundle import OutputBundle
+from document_extractor.exporters.debug import write_json
+from document_extractor.exporters.math import normalize_inline_math, render_math_cell
+from document_extractor.exporters.questions import render_question_table
 from document_extractor.html_images import rewrite_image_sources
 from document_extractor.models import FormulaPlacement, NormalizedDocument, TableContent
 
@@ -11,16 +14,14 @@ def render_table(table: TableContent) -> str:
         return table.html
 
     def row(cells):
-        # Preserve literal cell text rather than interpreting it as Markdown.
-        escaped = []
-        for cell in cells:
-            for char in ("\\", "|", "*", "_", "`", "[", "]", "$"):
-                cell = cell.replace(char, "\\" + char)
-            cell = cell.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-            escaped.append(cell)
-        return "| " + " | ".join(escaped) + " |"
+        return "| " + " | ".join(cells) + " |"
 
-    rows = list(table.rows)
+    rows = []
+    for cells in table.rows:
+        rendered = [render_math_cell(cell) for cell in cells]
+        if any(cell is None for cell in rendered):
+            return table.html
+        rows.append(tuple(cell for cell in rendered if cell is not None))
     header = rows.pop(0) if table.has_header else ("",) * len(rows[0])
     return "\n".join(
         [row(header), row(("---",) * len(header)), *(row(cells) for cells in rows)]
@@ -28,6 +29,12 @@ def render_table(table: TableContent) -> str:
 
 
 class DocumentExporter:
+    def __init__(
+        self, *, question_layout: bool = True, export_layout_report: bool = False
+    ) -> None:
+        self.question_layout = question_layout
+        self.export_layout_report = export_layout_report
+
     def export(
         self, document: NormalizedDocument, source: Path, output_root: Path
     ) -> OutputBundle:
@@ -41,6 +48,7 @@ class DocumentExporter:
         sections = []
         table_count = image_count = 0
         exported_assets: dict[str, str] = {}
+        layout_report: list[dict] = []
 
         def resolve_image(source: str, prefix: str) -> str:
             nonlocal image_count
@@ -74,8 +82,31 @@ class DocumentExporter:
                     (bundle.tables_dir / name).write_text(
                         artifact_html, encoding="utf-8"
                     )
+                    # Resolve assets while the content is still HTML. Decoding
+                    # entities into LaTeX comparisons during question rendering
+                    # can make a later HTML parser swallow an image tag.
+                    display_html = rewrite_image_sources(
+                        html, lambda src: resolve_image(src, "images/")
+                    )
+                    question = (
+                        render_question_table(display_html)
+                        if self.question_layout
+                        else None
+                    )
+                    if self.question_layout:
+                        layout_report.append(
+                            {
+                                "page": page.number,
+                                "table": name,
+                                "converted": question is not None,
+                                "warnings": question.warnings if question else [],
+                                "repairs": question.repairs if question else [],
+                            }
+                        )
                     sections.append(
-                        rewrite_image_sources(
+                        question.markdown
+                        if question
+                        else rewrite_image_sources(
                             render_table(element.table) if element.table else html,
                             lambda src: resolve_image(src, "images/"),
                         )
@@ -92,14 +123,20 @@ class DocumentExporter:
                 elif content:
                     if element.option_group is not None:
                         group = element.option_group
-                        paragraphs = [group.question] if group.question else []
+                        paragraphs = (
+                            [normalize_inline_math(group.question)]
+                            if group.question
+                            else []
+                        )
                         paragraphs.extend(
-                            f"{option.label} {option.content}"
+                            f"{option.label} {normalize_inline_math(option.content)}"
                             for option in group.options
                         )
                         sections.extend(paragraphs)
                         previous_inline = previous_text = False
                         continue
+                    if element.formula_placement is None:
+                        content = normalize_inline_math(content)
                     if element.formula_placement is not None:
                         if element.formula_placement == FormulaPlacement.INLINE:
                             content = f"${content}$"
@@ -129,4 +166,12 @@ class DocumentExporter:
                 previous_inline = element.formula_placement == FormulaPlacement.INLINE
                 previous_text = element.kind == "text"
         bundle.document_path.write_text("\n\n".join(sections) + "\n", encoding="utf-8")
+        if self.question_layout and self.export_layout_report:
+            write_json(
+                bundle.root_dir / "debug" / "question-layout.json",
+                {
+                    "schema_version": 1,
+                    "tables": layout_report,
+                },
+            )
         return bundle

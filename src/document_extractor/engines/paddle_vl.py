@@ -19,6 +19,7 @@ from document_extractor.html_images import rewrite_image_sources
 from document_extractor.models import DocumentElement, NormalizedDocument, Page
 from document_extractor.processing.mcq import retry_missing_options
 from document_extractor.processing.tables import retry_incomplete_tables
+from document_extractor.processing.watermarks import filter_watermarks
 
 
 class PaddleVLEngine:
@@ -115,6 +116,15 @@ class PaddleVLEngine:
         debug_results = (
             [deepcopy(result.json) for result in results] if self.debug else None
         )
+        watermark_report = filter_watermarks(
+            results,
+            path,
+            self.config.watermark_mode,
+            coordinates_transformed=(
+                self.config.use_doc_orientation_classify
+                or self.config.use_doc_unwarping
+            ),
+        )
         recovery_enabled = self.config.mcq_retry or self.config.table_retry
         if recovery_enabled and self.config.use_layout_detection:
             self.on_progress(ProgressEvent("recovery", "Checking incomplete questions"))
@@ -158,6 +168,7 @@ class PaddleVLEngine:
         self.on_progress(ProgressEvent("normalization", "Normalizing document"))
         document = adapt_results(results, path)
         document.debug_results = debug_results
+        document.watermark_report = watermark_report
         return document
 
 

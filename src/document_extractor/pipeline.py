@@ -1,13 +1,13 @@
 import logging
 from pathlib import Path
 
-from document_extractor.config import ExtractionConfig
+from document_extractor.config import ExtractionConfig, WatermarkMode
 from document_extractor.engines import create_engine
 from document_extractor.engines.base import DocumentEngine
 from document_extractor.events import ProgressCallback, ProgressEvent, ignore_progress
 from document_extractor.exceptions import DocumentExtractorError
 from document_extractor.exporters.bundle import OutputBundle
-from document_extractor.exporters.debug import export_debug
+from document_extractor.exporters.debug import export_debug, write_json
 from document_extractor.exporters.document import DocumentExporter
 from document_extractor.option_normalization import normalize_options
 from document_extractor.validation import validate_input
@@ -43,7 +43,10 @@ class ExtractionPipeline:
             if engine is not None
             else create_engine(self.config, on_progress=on_progress)
         )
-        self.exporter = DocumentExporter()
+        self.exporter = DocumentExporter(
+            question_layout=self.config.question_layout,
+            export_layout_report=self.config.debug,
+        )
 
     def run(self, input_path: Path, output_root: Path) -> OutputBundle:
         logging.getLogger(__name__).info("Validating %s", input_path)
@@ -70,6 +73,21 @@ class ExtractionPipeline:
             logging.getLogger(__name__).info("Writing Markdown, tables, and images")
             self.on_progress(ProgressEvent("export", "Exporting results"))
             bundle = self.exporter.export(document, input_path, output_root)
+            if self.config.watermark_mode == WatermarkMode.REPORT or self.config.debug:
+                watermark_path = (
+                    bundle.root_dir / "watermarks.json"
+                    if self.config.watermark_mode == WatermarkMode.REPORT
+                    else bundle.root_dir / "debug" / "watermarks.json"
+                )
+                write_json(
+                    watermark_path,
+                    {
+                        "schema_version": 1,
+                        "mode": self.config.watermark_mode,
+                        "bbox_coordinates": "original Paddle page pixels, top-left origin",
+                        "candidates": document.watermark_report,
+                    },
+                )
             if self.config.debug:
                 export_debug(document, bundle.root_dir / "debug", self.config)
             self.on_progress(
